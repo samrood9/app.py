@@ -3,6 +3,7 @@ import json
 import urllib.request
 import urllib.error
 import datetime
+import time
 
 # -----------------------------------------------------------------------------
 # APP CONFIGURATION & STATE INITIALIZATION
@@ -292,39 +293,50 @@ with tab_checkin:
                     )
                     
                     with st.spinner("Analyzing joint readiness & primary anchor taper..."):
-                        try:
-                            with urllib.request.urlopen(req) as resp:
-                                res_json = json.loads(resp.read().decode("utf-8"))
-                                raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                                ai_data = json.loads(raw_text)
-                                
-                                tier = ai_data.get("tier_applied", "TIER_0")
-                                if tier == "TIER_0":
-                                    st.success(f"🟢 **{tier}: Green Light - Session Approved**")
-                                elif tier == "TIER_1":
-                                    st.warning(f"⚠️ **{tier}: Micro-Swap & Taper Active**")
+                        ai_data = None
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            try:
+                                with urllib.request.urlopen(req) as resp:
+                                    res_json = json.loads(resp.read().decode("utf-8"))
+                                    raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                                    ai_data = json.loads(raw_text)
+                                    break
+                            except urllib.error.HTTPError as http_err:
+                                if http_err.code in [503, 429] and attempt < max_retries - 1:
+                                    time.sleep(2 * (attempt + 1))
+                                    continue
                                 else:
-                                    st.error(f"🚨 **{tier}: Schedule Pivot Triggered**")
-                                
-                                st.subheader(ai_data.get("status_headline", ""))
-                                st.write(f"**Rationale:** {ai_data.get('rationale', '')}")
-                                st.divider()
-                                
-                                st.markdown(f"### 📋 Adapted Session Plan ({available_time} Mins)")
-                                for idx, item in enumerate(ai_data.get("adapted_workout", []), 1):
-                                    badge = " `[MODIFIED]`" if item.get("is_modified") else ""
-                                    st.markdown(f"**{idx}. {item.get('exercise')}{badge}**")
-                                    st.markdown(f"* {item.get('sets_reps')} — *{item.get('notes')}*")
-                                
-                                st.divider()
-                                col_b1, col_b2 = st.columns(2)
-                                col_b1.button("✅ Accept AI Adaptation", use_container_width=True)
-                                col_b2.button("⚠️ Override & Do Default", use_container_width=True)
-                        except urllib.error.HTTPError as http_err:
-                            err_body = http_err.read().decode("utf-8")
-                            st.error(f"Google AI API HTTP Error {http_err.code}: {err_body}")
-                        except Exception as e:
-                            st.error(f"Error connecting to AI engine: {str(e)}")
+                                    err_body = http_err.read().decode("utf-8")
+                                    st.error(f"Google AI API HTTP Error {http_err.code}: {err_body}")
+                                    break
+                            except Exception as e:
+                                st.error(f"Error connecting to AI engine: {str(e)}")
+                                break
+                        
+                        if ai_data:
+                            tier = ai_data.get("tier_applied", "TIER_0")
+                            if tier == "TIER_0":
+                                st.success(f"🟢 **{tier}: Green Light - Session Approved**")
+                            elif tier == "TIER_1":
+                                st.warning(f"⚠️ **{tier}: Micro-Swap & Taper Active**")
+                            else:
+                                st.error(f"🚨 **{tier}: Schedule Pivot Triggered**")
+                            
+                            st.subheader(ai_data.get("status_headline", ""))
+                            st.write(f"**Rationale:** {ai_data.get('rationale', '')}")
+                            st.divider()
+                            
+                            st.markdown(f"### 📋 Adapted Session Plan ({available_time} Mins)")
+                            for idx, item in enumerate(ai_data.get("adapted_workout", []), 1):
+                                badge = " `[MODIFIED]`" if item.get("is_modified") else ""
+                                st.markdown(f"**{idx}. {item.get('exercise')}{badge}**")
+                                st.markdown(f"* {item.get('sets_reps')} — *{item.get('notes')}*")
+                            
+                            st.divider()
+                            col_b1, col_b2 = st.columns(2)
+                            col_b1.button("✅ Accept AI Adaptation", use_container_width=True)
+                            col_b2.button("⚠️ Override & Do Default", use_container_width=True)
         else:
             st.info("Complete the check-in on the left to generate today's session.")
 
