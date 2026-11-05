@@ -102,4 +102,96 @@ def get_ai_recommendation(scheduled, energy, flagged, time_avail, match_in_days)
     if not api_key:
         return {"error": "GEMINI_API_KEY is missing from Streamlit Secrets."}
 
-    url = f"
+    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    url = f"{endpoint}?key={api_key}"
+
+    prompt = (
+        "You are an elite sports scientist and adaptive S&C coach.\n\n"
+        "INPUT DATA:\n"
+        f"- Scheduled Today: {scheduled['name']}\n"
+        f"- Default Target Exercises: {json.dumps(scheduled['exercises'])}\n"
+        f"- Planned Duration: {scheduled['duration']} mins\n"
+        f"- User Available Time Today: {time_avail} mins\n"
+        f"- User Systemic Energy Score: {energy}/10\n"
+        f"- Flagged Soreness/Joint Tightness: {json.dumps(flagged)}\n"
+        f"- Days Until Next Match/Race Anchor: {match_in_days} days\n\n"
+        "LOGIC RULES:\n"
+        "1. TIER 0 (Green Light): High energy (>=7), no flagged areas, match >48h out -> Keep scheduled session intact.\n"
+        "2. TIER 1 (Micro-Swap/Taper): Flagged joint/muscle strain OR match 24-48h away -> Swap high-impact/high-shear lifts for safer alternatives (e.g. Heavy Back Squat -> Leg Press/Hack Squat if knees flagged; Plyos -> Isometrics), reduce volume by 20-30%.\n"
+        "3. TIER 2 (Schedule Pivot): Energy <= 3 OR match <24h away -> Shift lower body/high-impact work away, replace today with upper body pump, joint mobility, or light active recovery.\n\n"
+        "OUTPUT INSTRUCTIONS:\n"
+        "Return ONLY a raw JSON object (no markdown surrounding ticks) matching this structure:\n"
+        "{\n"
+        '  "tier_applied": "TIER_0" | "TIER_1" | "TIER_2",\n'
+        '  "status_headline": "Short 1-sentence headline summarizing today\'s change",\n'
+        '  "rationale": "Clear sports science explanation behind the adaptations",\n'
+        '  "adapted_workout": [\n'
+        '    {"exercise": "Exercise Name", "sets_reps": "3 sets x 8 reps", "notes": "Why modified or kept", "is_modified": true/false}\n'
+        "  ]\n"
+        "}\n"
+    )
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"response_mime_type": "application/json"}
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}
+    )
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            res_body = response.read().decode("utf-8")
+            res_json = json.loads(res_body)
+            raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+            return json.loads(raw_text)
+    except Exception as e:
+        return {"error": str(e)}
+
+# -----------------------------------------------------------------------------
+# OUTPUT DISPLAY
+# -----------------------------------------------------------------------------
+with col_output:
+    st.header("🎯 Session Advisory & Workout Output")
+    
+    if btn_generate:
+        with st.spinner("Connecting to Sports Science AI Engine..."):
+            ai_data = get_ai_recommendation(
+                scheduled_today, energy_score, flagged_all, available_time, fixture_days
+            )
+        
+        if "error" in ai_data:
+            st.error(f"API Error: {ai_data['error']}")
+        else:
+            tier = ai_data.get("tier_applied", "TIER_0")
+            
+            if tier == "TIER_0":
+                st.success(f"🟢 **{tier}: Green Light - Full Session Approved**")
+            elif tier == "TIER_1":
+                st.warning(f"⚠️ **{tier}: Micro-Swap & Taper Triggered**")
+            else:
+                st.error(f"🚨 **{tier}: Schedule Pivot Triggered**")
+
+            st.subheader(ai_data.get("status_headline", ""))
+            st.write(f"**Sports Science Rationale:** {ai_data.get('rationale', '')}")
+            
+            st.divider()
+            st.markdown(f"### 📋 Today's Session Plan ({available_time} Mins)")
+
+            workout_list = ai_data.get("adapted_workout", [])
+            for idx, item in enumerate(workout_list, 1):
+                mod_badge = " `[MODIFIED]`" if item.get("is_modified") else ""
+                st.markdown(f"**{idx}. {item.get('exercise')}{mod_badge}**")
+                st.markdown(f"* {item.get('sets_reps')} — *{item.get('notes')}*")
+
+            st.divider()
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                st.button("✅ Accept AI Adaptation", use_container_width=True)
+            with col_btn2:
+                st.button("⚠️ Override & Do Default", use_container_width=True)
+    else:
+        st.info("Complete the 3-step check-in on the left and click **Generate Today's Adapted Session** to run live AI periodization.")
