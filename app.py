@@ -262,8 +262,12 @@ with tab_checkin:
                 if not api_key:
                     st.error("GEMINI_API_KEY is missing from Streamlit Secrets.")
                 else:
-                    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
-                    url = f"{endpoint}?key={api_key}"
+                    # Model Fallback Cascade List
+                    models_to_try = [
+                        "gemini-3.8-flash",
+                        "gemini-2.5-flash",
+                        "gemini-1.5-flash"
+                    ]
                     
                     prompt = (
                         "You are an elite sports scientist and adaptive S&C coach.\n"
@@ -286,34 +290,38 @@ with tab_checkin:
                         "generationConfig": {"response_mime_type": "application/json"}
                     }
                     
-                    req = urllib.request.Request(
-                        url, 
-                        data=json.dumps(payload).encode("utf-8"), 
-                        headers={"Content-Type": "application/json"}
-                    )
-                    
+                    ai_data = None
+                    last_error_msg = ""
+
                     with st.spinner("Analyzing joint readiness & primary anchor taper..."):
-                        ai_data = None
-                        max_retries = 3
-                        for attempt in range(max_retries):
+                        for model_name in models_to_try:
+                            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+                            url = f"{endpoint}?key={api_key}"
+                            
+                            req = urllib.request.Request(
+                                url, 
+                                data=json.dumps(payload).encode("utf-8"), 
+                                headers={"Content-Type": "application/json"}
+                            )
+                            
                             try:
                                 with urllib.request.urlopen(req) as resp:
                                     res_json = json.loads(resp.read().decode("utf-8"))
                                     raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
                                     ai_data = json.loads(raw_text)
-                                    break
+                                    break  # Success! Exit loop
                             except urllib.error.HTTPError as http_err:
-                                if http_err.code in [503, 429] and attempt < max_retries - 1:
-                                    time.sleep(2 * (attempt + 1))
-                                    continue
+                                err_body = http_err.read().decode("utf-8")
+                                last_error_msg = f"HTTP {http_err.code}: {err_body}"
+                                if http_err.code in [503, 429, 404]:
+                                    time.sleep(1)
+                                    continue  # Fallback to next model in list
                                 else:
-                                    err_body = http_err.read().decode("utf-8")
-                                    st.error(f"Google AI API HTTP Error {http_err.code}: {err_body}")
                                     break
                             except Exception as e:
-                                st.error(f"Error connecting to AI engine: {str(e)}")
+                                last_error_msg = str(e)
                                 break
-                        
+
                         if ai_data:
                             tier = ai_data.get("tier_applied", "TIER_0")
                             if tier == "TIER_0":
@@ -337,6 +345,8 @@ with tab_checkin:
                             col_b1, col_b2 = st.columns(2)
                             col_b1.button("✅ Accept AI Adaptation", use_container_width=True)
                             col_b2.button("⚠️ Override & Do Default", use_container_width=True)
+                        else:
+                            st.error(f"Unable to connect to AI engine after trying all fallback models. Last details: {last_error_msg}")
         else:
             st.info("Complete the check-in on the left to generate today's session.")
 
