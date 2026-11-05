@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import urllib.request
+import urllib.error
 import datetime
 
 # -----------------------------------------------------------------------------
@@ -256,11 +257,11 @@ with tab_checkin:
             else:
                 current_exercises = st.session_state.custom_workouts.get(today_event['workout_name'], [today_event['workout_name']])
                 
-                api_key = st.secrets.get("GEMINI_API_KEY", "")
+                api_key = st.secrets.get("GEMINI_API_KEY", "").strip()
                 if not api_key:
                     st.error("GEMINI_API_KEY is missing from Streamlit Secrets.")
                 else:
-                    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+                    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
                     url = f"{endpoint}?key={api_key}"
                     
                     prompt = (
@@ -284,7 +285,11 @@ with tab_checkin:
                         "generationConfig": {"response_mime_type": "application/json"}
                     }
                     
-                    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+                    req = urllib.request.Request(
+                        url, 
+                        data=json.dumps(payload).encode("utf-8"), 
+                        headers={"Content-Type": "application/json"}
+                    )
                     
                     with st.spinner("Analyzing joint readiness & primary anchor taper..."):
                         try:
@@ -315,6 +320,9 @@ with tab_checkin:
                                 col_b1, col_b2 = st.columns(2)
                                 col_b1.button("✅ Accept AI Adaptation", use_container_width=True)
                                 col_b2.button("⚠️ Override & Do Default", use_container_width=True)
+                        except urllib.error.HTTPError as http_err:
+                            err_body = http_err.read().decode("utf-8")
+                            st.error(f"Google AI API HTTP Error {http_err.code}: {err_body}")
                         except Exception as e:
                             st.error(f"Error connecting to AI engine: {str(e)}")
         else:
