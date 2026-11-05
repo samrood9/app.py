@@ -61,7 +61,6 @@ if not st.session_state.user_authenticated:
     st.subheader("Step 2: Activity Hierarchy Setup")
     st.write("Select your training activities. Your **Primary Activity** acts as the immovable anchor that the AI adapts everything else around.")
 
-    # Render dynamic activity selection fields
     updated_activities = []
     for idx, act_val in enumerate(st.session_state.activity_slots):
         label = f"🏆 Activity 1 (Primary Anchor - Immovable)" if idx == 0 else f"🥈 Activity {idx + 1}"
@@ -114,100 +113,4 @@ if st.sidebar.button("Log Out / Reset Account"):
     st.rerun()
 
 tab_checkin, tab_calendar, tab_library = st.tabs([
-    "⚡ Today's Check-In", 
-    "📅 Calendar & Scheduling", 
-    "⚙️ Custom Workout Builder"
-])
-
-# Helper: Find nearest upcoming Primary Anchor date
-today_date = datetime.date.today()
-today_key = str(today_date)
-upcoming_anchors = []
-for d_str, ev in st.session_state.calendar_events.items():
-    ev_date = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
-    if ev.get("is_anchor") and ev_date >= today_date:
-        days_diff = (ev_date - today_date).days
-        upcoming_anchors.append(days_diff)
-
-nearest_anchor_days = min(upcoming_anchors) if upcoming_anchors else 99.0
-
-# -----------------------------------------------------------------------------
-# TAB 1: TODAY'S CHECK-IN
-# -----------------------------------------------------------------------------
-with tab_checkin:
-    col_input, col_output = st.columns([1, 1], gap="large")
-    today_event = st.session_state.calendar_events.get(today_key, {"type": "Rest", "workout_name": "Rest & Recovery", "color": "⚪", "is_anchor": False})
-
-    with col_input:
-        st.header("📝 Daily 30-Second Check-In")
-        st.info(f"**Scheduled Today ({today_key}):** {today_event['color']} {today_event['workout_name']}")
-        
-        if 0.0 < nearest_anchor_days <= 2.0:
-            st.warning(f"⚡ **Taper Zone Active:** {profile.get('primary_anchor')} scheduled in {nearest_anchor_days:.1f} days.")
-        elif nearest_anchor_days == 0.0:
-            st.error(f"🔴 **PRIMARY ANCHOR DAY TODAY ({profile.get('primary_anchor')}):** Focus on performance and recovery!")
-        else:
-            st.caption(f"📍 No primary {profile.get('primary_anchor')} anchors detected in the next 48 hours.")
-
-        energy_score = st.slider("1. Systemic Energy Score (1 = Battered, 10 = Peak)", 1, 10, 6)
-        
-        st.write("2. Flag Localized Soreness / Joint Tightness")
-        lower_body_areas = ["Knees / Patellar", "Hamstrings", "Quadriceps", "Calves / Achilles", "Groin / Adductors", "Shins", "Ankles", "Glutes / Hips"]
-        upper_body_areas = ["Shoulders / Rotator Cuff", "Upper Back / Lats", "Low Back", "Chest", "Triceps / Biceps", "Forearms / Elbows", "Core / Abs"]
-        
-        flagged_lower = st.multiselect("Lower Body & Joints", lower_body_areas)
-        flagged_upper = st.multiselect("Upper Body & Core", upper_body_areas)
-        flagged_all = flagged_lower + flagged_upper
-
-        available_time = st.slider("3. Available Time Today (Minutes)", 15, 120, 45, step=15)
-        btn_generate = st.button("⚡ Generate Today's Adapted Session", type="primary", use_container_width=True)
-
-    with col_output:
-        st.header("🎯 AI Sports Science Output")
-        if btn_generate:
-            if today_event["type"] == "Rest":
-                st.success("⚪ **REST DAY SCHEDULED**")
-                st.write("Enjoy active recovery today. Maintain hydration and mobility!")
-            else:
-                current_exercises = st.session_state.custom_workouts.get(today_event['workout_name'], [today_event['workout_name']])
-                
-                api_key = st.secrets.get("GEMINI_API_KEY", "")
-                if not api_key:
-                    st.error("GEMINI_API_KEY is missing from Streamlit Secrets.")
-                else:
-                    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-                    url = f"{endpoint}?key={api_key}"
-                    
-                    prompt = (
-                        "You are an elite sports scientist and adaptive S&C coach.\n"
-                        f"PRIMARY ANCHOR SPORT: {profile.get('primary_anchor')}\n"
-                        f"SCHEDULED TODAY: {today_event['workout_name']}\n"
-                        f"TARGET EXERCISES: {json.dumps(current_exercises)}\n"
-                        f"AVAILABLE TIME: {available_time} mins\n"
-                        f"ENERGY SCORE: {energy_score}/10\n"
-                        f"FLAGGED SORENESS: {json.dumps(flagged_all)}\n"
-                        f"DAYS UNTIL NEXT PRIMARY ANCHOR: {nearest_anchor_days} days\n\n"
-                        "LOGIC:\n"
-                        "Tier 0 = Green Light (High energy, no joint issues, anchor >48h out).\n"
-                        "Tier 1 = Micro-Swap/Taper (Joint strain or anchor 24-48h away -> Reduce volume 20-30%, swap high-impact lifts).\n"
-                        "Tier 2 = Session Pivot (Energy <=3 or anchor <24h away -> Pivot lower body work to upper body pump or active mobility).\n"
-                        "Return ONLY raw JSON with keys: tier_applied, status_headline, rationale, adapted_workout (list of objects with exercise, sets_reps, notes, is_modified)."
-                    )
-                    
-                    payload = {
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"response_mime_type": "application/json"}
-                    }
-                    
-                    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-                    
-                    with st.spinner("Analyzing joint readiness & primary anchor taper..."):
-                        try:
-                            with urllib.request.urlopen(req) as resp:
-                                res_json = json.loads(resp.read().decode("utf-8"))
-                                raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                                ai_data = json.loads(raw_text)
-                                
-                                tier = ai_data.get("tier_applied", "TIER_0")
-                                if tier == "TIER_0":
-                                    st
+    "⚡ Today
