@@ -63,7 +63,7 @@ if not st.session_state.user_authenticated:
 
     updated_activities = []
     for idx, act_val in enumerate(st.session_state.activity_slots):
-        label = f"🏆 Activity 1 (Primary Anchor - Immovable)" if idx == 0 else f"🥈 Activity {idx + 1}"
+        label = "🏆 Activity 1 (Primary Anchor - Immovable)" if idx == 0 else f"🥈 Activity {idx + 1}"
         default_idx = ALL_ACTIVITIES.index(act_val) if act_val in ALL_ACTIVITIES else 0
         selected_act = st.selectbox(label, ALL_ACTIVITIES, index=default_idx, key=f"act_slot_{idx}")
         updated_activities.append(selected_act)
@@ -112,5 +112,51 @@ if st.sidebar.button("Log Out / Reset Account"):
     st.session_state.user_authenticated = False
     st.rerun()
 
-tab_checkin, tab_calendar, tab_library = st.tabs([
-    "⚡ Today
+tab_checkin, tab_calendar, tab_library = st.tabs(
+    ["⚡ Daily Check-In", "📅 Calendar & Scheduling", "⚙️ Custom Workout Builder"]
+)
+
+today_date = datetime.date.today()
+today_key = str(today_date)
+upcoming_anchors = []
+for d_str, ev in st.session_state.calendar_events.items():
+    ev_date = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
+    if ev.get("is_anchor") and ev_date >= today_date:
+        days_diff = (ev_date - today_date).days
+        upcoming_anchors.append(days_diff)
+
+nearest_anchor_days = min(upcoming_anchors) if upcoming_anchors else 99.0
+
+# -----------------------------------------------------------------------------
+# TAB 1: TODAY'S CHECK-IN
+# -----------------------------------------------------------------------------
+with tab_checkin:
+    col_input, col_output = st.columns([1, 1], gap="large")
+    today_event = st.session_state.calendar_events.get(today_key, {"type": "Rest", "workout_name": "Rest & Recovery", "color": "⚪", "is_anchor": False})
+
+    with col_input:
+        st.header("📝 Daily 30-Second Check-In")
+        st.info(f"**Scheduled Today ({today_key}):** {today_event['color']} {today_event['workout_name']}")
+        
+        if 0.0 < nearest_anchor_days <= 2.0:
+            st.warning(f"⚡ **Taper Zone Active:** {profile.get('primary_anchor')} scheduled in {nearest_anchor_days:.1f} days.")
+        elif nearest_anchor_days == 0.0:
+            st.error(f"🔴 **PRIMARY ANCHOR DAY TODAY ({profile.get('primary_anchor')}):** Focus on performance and recovery!")
+        else:
+            st.caption(f"📍 No primary {profile.get('primary_anchor')} anchors detected in the next 48 hours.")
+
+        energy_score = st.slider("1. Systemic Energy Score (1 = Battered, 10 = Peak)", 1, 10, 6)
+        
+        st.write("2. Flag Localized Soreness / Joint Tightness")
+        lower_body_areas = ["Knees / Patellar", "Hamstrings", "Quadriceps", "Calves / Achilles", "Groin / Adductors", "Shins", "Ankles", "Glutes / Hips"]
+        upper_body_areas = ["Shoulders / Rotator Cuff", "Upper Back / Lats", "Low Back", "Chest", "Triceps / Biceps", "Forearms / Elbows", "Core / Abs"]
+        
+        flagged_lower = st.multiselect("Lower Body & Joints", lower_body_areas)
+        flagged_upper = st.multiselect("Upper Body & Core", upper_body_areas)
+        flagged_all = flagged_lower + flagged_upper
+
+        available_time = st.slider("3. Available Time Today (Minutes)", 15, 120, 45, step=15)
+        btn_generate = st.button("⚡ Generate Today's Adapted Session", type="primary", use_container_width=True)
+
+    with col_output:
+        st.header("🎯 AI Sports Science Output")
