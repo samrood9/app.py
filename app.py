@@ -272,4 +272,203 @@ with tab_checkin:
                         f"TARGET EXERCISES: {json.dumps(current_exercises)}\n"
                         f"AVAILABLE TIME: {available_time} mins\n"
                         f"ENERGY SCORE: {energy_score}/10\n"
-                        f"FLAGGED SORE
+                        f"FLAGGED SORENESS: {json.dumps(flagged_all)}\n"
+                        f"DAYS UNTIL NEXT PRIMARY ANCHOR: {nearest_anchor_days} days\n\n"
+                        "LOGIC:\n"
+                        "Tier 0 = Green Light (High energy, no joint issues, anchor >48h out).\n"
+                        "Tier 1 = Micro-Swap/Taper (Joint strain or anchor 24-48h away -> Reduce volume 20-30%, swap high-impact lifts).\n"
+                        "Tier 2 = Session Pivot (Energy <=3 or anchor <24h away -> Pivot lower body work to upper body pump or active mobility).\n"
+                        "Return ONLY raw JSON with keys: tier_applied, status_headline, rationale, adapted_workout (list of objects with exercise, sets_reps, notes, is_modified)."
+                    )
+                    
+                    payload = {
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"response_mime_type": "application/json"}
+                    }
+                    
+                    ai_data = None
+                    last_error_msg = ""
+
+                    with st.spinner("Analyzing joint readiness & primary anchor taper..."):
+                        for model_name in models_to_try:
+                            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+                            url = f"{endpoint}?key={api_key}"
+                            
+                            req = urllib.request.Request(
+                                url, 
+                                data=json.dumps(payload).encode("utf-8"), 
+                                headers={"Content-Type": "application/json"}
+                            )
+                            
+                            for attempt in range(3):
+                                try:
+                                    with urllib.request.urlopen(req) as resp:
+                                        res_json = json.loads(resp.read().decode("utf-8"))
+                                        raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                                        ai_data = json.loads(raw_text)
+                                        break
+                                except urllib.error.HTTPError as http_err:
+                                    err_body = http_err.read().decode("utf-8")
+                                    last_error_msg = f"HTTP {http_err.code} on {model_name}: {err_body}"
+                                    if http_err.code in [503, 429] and attempt < 2:
+                                        time.sleep(2 * (attempt + 1))
+                                        continue
+                                    else:
+                                        break
+                                except Exception as e:
+                                    last_error_msg = str(e)
+                                    break
+                            
+                            if ai_data:
+                                break
+
+                        if ai_data:
+                            tier = ai_data.get("tier_applied", "TIER_0")
+                            if tier == "TIER_0":
+                                st.success(f"🟢 **{tier}: Green Light - Session Approved**")
+                            elif tier == "TIER_1":
+                                st.warning(f"⚠️ **{tier}: Micro-Swap & Taper Active**")
+                            else:
+                                st.error(f"🚨 **{tier}: Schedule Pivot Triggered**")
+                            
+                            st.subheader(ai_data.get("status_headline", ""))
+                            st.write(f"**Rationale:** {ai_data.get('rationale', '')}")
+                            st.divider()
+                            
+                            st.markdown(f"### 📋 Adapted Session Plan ({available_time} Mins)")
+                            for idx, item in enumerate(ai_data.get("adapted_workout", []), 1):
+                                badge = " `[MODIFIED]`" if item.get("is_modified") else ""
+                                st.markdown(f"**{idx}. {item.get('exercise')}{badge}**")
+                                st.markdown(f"* {item.get('sets_reps')} — *{item.get('notes')}*")
+                            
+                            st.divider()
+                            col_b1, col_b2 = st.columns(2)
+                            col_b1.button("✅ Accept AI Adaptation", use_container_width=True)
+                            col_b2.button("⚠️ Override & Do Default", use_container_width=True)
+                        else:
+                            st.error("Google AI API high demand spike. Please try again in a few seconds.")
+                            st.caption(f"Details: {last_error_msg}")
+        else:
+            st.info("Complete the check-in on the left to generate today's session.")
+
+# -----------------------------------------------------------------------------
+# TAB 2: CALENDAR & SCHEDULING (FULL FUNCTIONALITY)
+# -----------------------------------------------------------------------------
+with tab_calendar:
+    st.header("📅 Dynamic Schedule & Fixture Planner")
+    st.caption(f"Schedule events for any activity. **🔴 {profile.get('primary_anchor')}** acts as your immovable primary anchor.")
+
+    col_cal_left, col_cal_right = st.columns([1, 1], gap="large")
+
+    with col_cal_left:
+        st.subheader("Add / Edit Calendar Event")
+        selected_date = st.date_input("Select Date", datetime.date.today(), key="cal_tab_date")
+        date_str = str(selected_date)
+
+        chosen_activity = st.selectbox("Select Activity Category", profile.get("activities", ALL_ACTIVITIES) + ["Rest / Recovery"], key="cal_tab_act")
+        is_primary_anchor = (chosen_activity == profile.get("primary_anchor"))
+        
+        if is_primary_anchor:
+            e_color = "🔴"
+            event_name = st.text_input(f"Primary Anchor Details ({chosen_activity})", value=f"Competitive {chosen_activity} Fixture", key="cal_tab_desc_anchor")
+        elif chosen_activity == "Rest / Recovery":
+            e_color = "⚪"
+            event_name = "Rest & Active Recovery"
+        elif chosen_activity == "Gym / Strength Training":
+            e_color = "🔵"
+            event_name = st.selectbox("Select Gym Routine", list(st.session_state.custom_workouts.keys()), key="cal_tab_desc_gym")
+        else:
+            e_color = "🟢"
+            event_name = st.text_input(f"Session Details ({chosen_activity})", value=f"{chosen_activity} Session", key="cal_tab_desc_other")
+
+        if st.button("📌 Save Event to Calendar", type="primary", key="cal_tab_save"):
+            st.session_state.calendar_events[date_str] = {
+                "type": chosen_activity,
+                "workout_name": event_name,
+                "color": e_color,
+                "is_anchor": is_primary_anchor
+            }
+            st.success(f"Saved {e_color} {event_name} for {date_str}!")
+            st.rerun()
+
+    with col_cal_right:
+        st.subheader("Logged Schedule View")
+        if not st.session_state.calendar_events:
+            st.write("No events logged.")
+        else:
+            sorted_events = sorted(st.session_state.calendar_events.items(), key=lambda x: x[0])
+            anchor_dates = [
+                datetime.datetime.strptime(d_s, "%Y-%m-%d").date() 
+                for d_s, ev in st.session_state.calendar_events.items() if ev.get("is_anchor")
+            ]
+
+            for d_str, ev in sorted_events:
+                ev_d = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
+                is_taper = False
+                hours_to = 0
+                for a_d in anchor_dates:
+                    diff = (a_d - ev_d).days
+                    if 0 < diff <= 2:
+                        is_taper = True
+                        hours_to = diff * 24
+                        break
+
+                c1, c2, c3 = st.columns([2, 4, 1])
+                c1.write(f"**{d_str}**")
+                
+                taper_subtitle = f"\n*⚡ Taper Zone ({hours_to}h to {profile.get('primary_anchor')})*" if (is_taper and not ev.get("is_anchor")) else ""
+                anchor_tag = " `[PRIMARY ANCHOR]`" if ev.get("is_anchor") else ""
+                c2.markdown(f"{ev['color']} **{ev['workout_name']}**{anchor_tag}{taper_subtitle}")
+                
+                if c3.button("🗑️", key=f"del_cal_{d_str}"):
+                    del st.session_state.calendar_events[d_str]
+                    st.rerun()
+
+# -----------------------------------------------------------------------------
+# TAB 3: CUSTOM WORKOUT BUILDER (FULL FUNCTIONALITY)
+# -----------------------------------------------------------------------------
+with tab_library:
+    st.header("⚙️ Dynamic Workout Builder")
+    st.write("Manage your saved gym routines and split workouts.")
+
+    for w_name, ex_list in list(st.session_state.custom_workouts.items()):
+        with st.expander(f"🏋️ {w_name} ({len(ex_list)} Exercises)", expanded=False):
+            st.write("**Exercises Included:**")
+            for ex in ex_list:
+                st.markdown(f"- {ex}")
+            if st.button(f"Delete '{w_name}'", key=f"del_main_w_{w_name}"):
+                del st.session_state.custom_workouts[w_name]
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("➕ Create New Routine")
+    
+    main_routine_title = st.text_input("Routine Title", value="Upper Body Hypertrophy", key="main_routine_title_input")
+    st.write("**Exercises:**")
+    
+    main_ex_list = []
+    for idx, ex_val in enumerate(st.session_state.temp_exercise_list):
+        new_ex = st.text_input(f"Exercise #{idx + 1}", value=ex_val, key=f"main_tab_ex_{idx}")
+        main_ex_list.append(new_ex)
+    st.session_state.temp_exercise_list = main_ex_list
+
+    col_ex1, col_ex2 = st.columns([1, 3])
+    with col_ex1:
+        if st.button("➕ Add Exercise", key="main_tab_add_ex"):
+            st.session_state.temp_exercise_list.append("")
+            st.rerun()
+    with col_ex2:
+        if len(st.session_state.temp_exercise_list) > 1:
+            if st.button("➖ Remove Exercise", key="main_tab_rem_ex"):
+                st.session_state.temp_exercise_list.pop()
+                st.rerun()
+
+    if st.button("💾 Save Routine to Library", type="primary", use_container_width=True, key="main_tab_save_routine"):
+        clean_exs = [e.strip() for e in st.session_state.temp_exercise_list if e.strip()]
+        if main_routine_title and clean_exs:
+            st.session_state.custom_workouts[main_routine_title] = clean_exs
+            st.success(f"Saved '{main_routine_title}' with {len(clean_exs)} exercises!")
+            st.session_state.temp_exercise_list = ["Barbell Squats (4x6)", "Romanian Deadlifts (3x8)"]
+            st.rerun()
+        else:
+            st.error("Please provide a title and at least one exercise.")
